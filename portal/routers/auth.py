@@ -21,6 +21,7 @@ from portal.config import settings
 from portal.database import (
     create_auth_token,
     create_user,
+    get_auth_token,
     get_session,
     get_user_by_email,
     get_user_by_id,
@@ -346,6 +347,24 @@ async def forgot_password_request(request: Request):
 
 @router.get("/auth/reset/{token}")
 async def reset_password_page(request: Request, token: str):
+    async with get_session() as session:
+        tok = await get_auth_token(session, token)
+        error = None
+        if tok is None or tok.token_type != "password_reset":
+            error = "Invalid reset link."
+        elif tok.is_expired:
+            error = "This reset link has expired."
+        elif tok.is_used:
+            error = "This reset link has already been used."
+
+        if error:
+            return templates.TemplateResponse(
+                request=request,
+                name="reset_password.html",
+                context={"token": token, "error": error},
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
     return templates.TemplateResponse(request=request, name="reset_password.html", context={"token": token})
 
 
