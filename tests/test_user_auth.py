@@ -459,6 +459,47 @@ class TestPasswordReset:
             assert b"<form" not in resp_get_after.content
             assert b"already been used" in resp_get_after.content
 
+    @pytest.mark.anyio
+    async def test_reset_password_post_validation_error_keeps_form_visible(self, setup_db):
+        from portal.database import create_auth_token, get_auth_token, get_session
+
+        user = await _create_test_user(email="reset-shortpass@example.com")
+        async with get_session() as s:
+            await create_auth_token(s, jti="retryable-token", user_id=user.id, token_type="password_reset")
+
+        async with _client() as c:
+            # 1. Submit password shorter than 8 characters
+            resp_short = await c.post(
+                "/auth/reset/retryable-token",
+                data={"password": "short"},
+                follow_redirects=False,
+            )
+            assert resp_short.status_code == 400
+            assert b"Password must be at least 8 characters" in resp_short.content
+            assert b'<form method="post" action="/auth/reset/retryable-token"' in resp_short.content
+            assert b"Back to Login to request a new link" not in resp_short.content
+
+            # 2. Token must remain unused in the database
+            async with get_session() as s:
+                tok = await get_auth_token(s, "retryable-token")
+                assert tok is not None
+                assert tok.is_used is False
+
+            # 3. User can retry and successfully reset password with valid length
+            resp_retry = await c.post(
+                "/auth/reset/retryable-token",
+                data={"password": "validpassword123"},
+                follow_redirects=False,
+            )
+            assert resp_retry.status_code == 303
+            assert resp_retry.headers["location"] == "/account"
+
+            # 4. Token is now marked used
+            async with get_session() as s:
+                tok_after = await get_auth_token(s, "retryable-token")
+                assert tok_after is not None
+                assert tok_after.is_used is True
+
 
 # ---------------------------------------------------------------------------
 # Logout

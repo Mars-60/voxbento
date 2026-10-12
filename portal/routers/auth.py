@@ -361,7 +361,7 @@ async def reset_password_page(request: Request, token: str):
             return templates.TemplateResponse(
                 request=request,
                 name="reset_password.html",
-                context={"token": token, "error": error},
+                context={"token": token, "error": error, "token_invalid": True},
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -378,6 +378,7 @@ async def reset_password_submit(request: Request, token: str):
             request=request,
             name="reset_password.html",
             context={"token": token, "error": "Password must be at least 8 characters"},
+            status_code=status.HTTP_400_BAD_REQUEST,
         )
 
     async with get_session() as session:
@@ -400,7 +401,10 @@ async def reset_password_submit(request: Request, token: str):
             return response
         except ValueError as e:
             return templates.TemplateResponse(
-                request=request, name="reset_password.html", context={"token": token, "error": str(e)}
+                request=request,
+                name="reset_password.html",
+                context={"token": token, "error": str(e), "token_invalid": True},
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
 
 
