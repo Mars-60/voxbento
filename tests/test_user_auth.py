@@ -500,6 +500,66 @@ class TestPasswordReset:
                 assert tok_after is not None
                 assert tok_after.is_used is True
 
+    @pytest.mark.anyio
+    async def test_reset_password_post_redemption_failure_shows_invalid_token(self, setup_db):
+        from portal.database import create_auth_token, get_session
+
+        user = await _create_test_user(email="reset-expired-post@example.com")
+        async with get_session() as s:
+            await create_auth_token(
+                s, jti="expired-post-token", user_id=user.id, token_type="password_reset", expires_in_seconds=-3600
+            )
+
+        async with _client() as c:
+            resp = await c.post(
+                "/auth/reset/expired-post-token",
+                data={"password": "validpassword123"},
+                follow_redirects=False,
+            )
+            assert resp.status_code == 400
+            assert b"Token has expired." in resp.content
+            assert b"Back to Login to request a new link" in resp.content
+            assert b"<form" not in resp.content
+
+    @pytest.mark.anyio
+    async def test_reset_password_post_update_error_rolls_back_token_and_password(self, setup_db, monkeypatch):
+        import portal.routers.auth as auth_router
+        from portal.database import create_auth_token, get_auth_token, get_session, get_user_by_id
+
+        user = await _create_test_user(email="reset-atomic@example.com", password="originalpassword123")
+        original_hash = user.password_hash
+        async with get_session() as s:
+            await create_auth_token(s, jti="atomic-err-token", user_id=user.id, token_type="password_reset")
+
+        def _mock_create_user_token(*args, **kwargs):
+            raise RuntimeError("Token signing service unavailable")
+
+        monkeypatch.setattr(auth_router, "create_user_token", _mock_create_user_token)
+
+        async with _client() as c:
+            resp = await c.post(
+                "/auth/reset/atomic-err-token",
+                data={"password": "brandnewpassword123"},
+                follow_redirects=False,
+            )
+            assert resp.status_code == 500
+            assert b"An error occurred while resetting your password. Please try again." in resp.content
+            assert b"Token signing service unavailable" not in resp.content
+            assert b"Back to Login to request a new link" not in resp.content
+
+        # Verify database atomicity: both token usage and password update were rolled back
+        async with get_session() as s:
+            tok = await get_auth_token(s, "atomic-err-token")
+            assert tok is not None
+            assert tok.is_used is False
+            assert tok.used_at is None
+
+            user_after = await get_user_by_id(s, user.id)
+            assert user_after is not None
+            assert user_after.password_hash == original_hash
+            assert verify_password("originalpassword123", user_after.password_hash) is True
+            assert verify_password("brandnewpassword123", user_after.password_hash) is False
+
 
 # ---------------------------------------------------------------------------
 # Logout
