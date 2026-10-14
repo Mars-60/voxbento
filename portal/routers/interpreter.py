@@ -76,6 +76,7 @@ async def interpreter_landing_page(request: Request) -> Any:
                     .join(Event)
                     .where(
                         Event.slug == invite_sess["event_slug"],
+                        Event.deleted_at.is_(None),
                         DBBooth.room_id == invite_sess["room_id"],
                         DBBooth.language_code == invite_sess["language_code"],
                     )
@@ -138,6 +139,7 @@ async def interpreter_booth_by_identity(
             .join(Event)
             .options(joinedload(DBBooth.room))
             .where(Event.slug == event_slug)
+            .where(Event.deleted_at.is_(None))
             .where(DBBooth.room_id == room_id)
             .where(DBBooth.language_code == language_code)
         )
