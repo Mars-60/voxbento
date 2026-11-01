@@ -21,6 +21,7 @@ from datetime import timedelta
 import pytest
 
 from portal.auth import create_user_token, hash_password
+from portal.team import MAX_INVITE_HOURS
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -421,6 +422,42 @@ class TestAdminTokenRoutes:
             tokens = await list_tokens_for_booth(s, booth.id)
         assert len(tokens) == 1
         assert tokens[0].expires_at is not None
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("invalid_expiry", ["abc", "0", "-5", str(MAX_INVITE_HOURS + 1)])
+    async def test_generate_token_with_invalid_expiry_rejected(self, setup_db, admin_cookie, invalid_expiry):
+        from portal.database import get_session, list_tokens_for_booth
+
+        event, room, booth = await _seed_event_room_booth()
+        async with _client() as c:
+            resp = await c.post(
+                f"/admin/events/{event.id}/rooms/{room.id}/booths/{booth.id}/tokens/",
+                data={"role": "interpreter", "label": "BadExpiry", "expires_hours": invalid_expiry},
+                cookies=admin_cookie,
+                follow_redirects=False,
+            )
+        assert resp.status_code == 400
+        async with get_session() as s:
+            tokens = await list_tokens_for_booth(s, booth.id)
+        assert len(tokens) == 0
+
+    @pytest.mark.anyio
+    async def test_generate_token_with_empty_expiry_creates_non_expiring_token(self, setup_db, admin_cookie):
+        from portal.database import get_session, list_tokens_for_booth
+
+        event, room, booth = await _seed_event_room_booth()
+        async with _client() as c:
+            resp = await c.post(
+                f"/admin/events/{event.id}/rooms/{room.id}/booths/{booth.id}/tokens/",
+                data={"role": "interpreter", "label": "NoExpiry", "expires_hours": ""},
+                cookies=admin_cookie,
+                follow_redirects=False,
+            )
+        assert resp.status_code == 303
+        async with get_session() as s:
+            tokens = await list_tokens_for_booth(s, booth.id)
+        assert len(tokens) == 1
+        assert tokens[0].expires_at is None
 
     @pytest.mark.anyio
     async def test_generate_token_requires_admin(self, setup_db):

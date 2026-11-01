@@ -160,8 +160,8 @@ from portal.room_setup import DELIVERY_LABELS as ROOM_DELIVERY_LABELS
 from portal.room_setup import SPEECH_MODELS as ROOM_SPEECH_MODELS
 from portal.room_setup import VOICE_PRESETS as ROOM_VOICE_PRESETS
 from portal.room_setup import language_name as room_language_name
+from portal.team import MAX_INVITE_HOURS, TeamError, load_team
 from portal.team import ROLE_CHOICES as TEAM_ROLE_CHOICES
-from portal.team import TeamError, load_team
 from portal.team import add_member as add_team_member
 from portal.team import create_invite_link as create_team_invite_link
 from portal.team import parse_place as parse_team_place
@@ -3421,9 +3421,15 @@ async def admin_create_token(request: Request, event_id: int, room_id: int, boot
     expires_at = None
     if expires_hours:
         try:
-            expires_at = utc_now() + timedelta(hours=int(expires_hours))
+            hours = int(expires_hours)
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail="Enter the expiry in whole hours.") from None
+        if not 1 <= hours <= MAX_INVITE_HOURS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Links can last between 1 and {MAX_INVITE_HOURS} hours.",
+            )
+        expires_at = utc_now() + timedelta(hours=hours)
     async with get_session() as session:
         await booth_in_room(session, event_id, room_id, booth_id)
         if role:
